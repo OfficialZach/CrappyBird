@@ -13,13 +13,5 @@
         android:gravity="center"
         android:layout_centerHorizontal="true"/>
 
-    <com.google.android.gms.ads.AdView
-        android:id="@+id/adViewId"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        ads:adSize="BANNER"
-        ads:adUnitId="@string/banner_ad_unit_id"
-        android:layout_centerHorizontal="true" />
 
 </RelativeLayout>

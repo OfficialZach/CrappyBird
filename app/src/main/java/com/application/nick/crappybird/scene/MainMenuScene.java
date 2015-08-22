@@ -1,12 +1,10 @@
 package com.application.nick.crappybird.scene;
 
+import com.application.nick.crappybird.R;
 import com.application.nick.crappybird.SceneManager;
 import com.application.nick.crappybird.entity.Bird;
-import com.application.nick.crappybird.entity.Crap;
-import com.application.nick.crappybird.entity.CrapPool;
-import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.GooglePlayServicesUtil;
-import com.parse.ParseUser;
+import com.application.nick.crappybird.entity.crap.Crap;
+import com.application.nick.crappybird.entity.crap.CrapPool;
 
 import org.andengine.engine.handler.IUpdateHandler;
 import org.andengine.entity.primitive.Rectangle;
@@ -14,6 +12,7 @@ import org.andengine.entity.scene.CameraScene;
 import org.andengine.entity.scene.background.AutoParallaxBackground;
 import org.andengine.entity.scene.background.ParallaxBackground;
 import org.andengine.entity.shape.IShape;
+import org.andengine.entity.shape.RectangularShape;
 import org.andengine.entity.sprite.Sprite;
 import org.andengine.entity.sprite.TiledSprite;
 import org.andengine.entity.util.FPSLogger;
@@ -28,16 +27,15 @@ import java.util.List;
  */
 public class MainMenuScene extends BaseScene {
 
-    private final int MAX_TUTORIAL_TILE_INDEX = 3;
 
     private Bird mBird;
     private CrapPool mCrapPool;
     private List<Crap> mCraps = new ArrayList<Crap>();
 
-    private TiledSprite playButton, helpButton, marketButton, leaderboardButton;
+    private TiledSprite playButton, myBirdsButton, moreOptionsButton;
     private Sprite title;
 
-    private boolean playTransition = false, showingTutorial = false;
+    private boolean playTransition = false, tutorialSceneOpen = false, googlePlaySceneOpen = false, moreOptionsSceneOpen = false;
 
     private final int MAX_CRAPS = 10;
 
@@ -46,7 +44,7 @@ public class MainMenuScene extends BaseScene {
     private ParallaxBackground.ParallaxEntity parallaxLayerMiddle;
     private ParallaxBackground.ParallaxEntity parallaxLayerFront;
 
-    private CameraScene mTutorialScene;
+    private CameraScene mTutorialScene, mMoreOptionsScene, mGooglePlayScene;
 
 
     @Override
@@ -66,16 +64,9 @@ public class MainMenuScene extends BaseScene {
         setBackground(autoParallaxBackground);
 
         title = new Sprite(0, 0, mResourceManager.mTitleTextureRegion, mVertexBufferObjectManager);
-        title.setPosition((SCREEN_WIDTH - title.getWidth()) / 2f, 75);
-        title.setScale(1.5f);
+        title.setPosition((SCREEN_WIDTH - title.getWidth()) / 2f, 50);
         attachChild(title);
 
-
-        if (ParseUser.getCurrentUser() == null) {
-            mActivity.setSelectedBird(0); //no fancy birds without account
-        }
-
-        mActivity.updateCurrentUser();
 
         final float birdX = (SCREEN_WIDTH - mResourceManager.mBirdTextureRegion.getWidth()) / 2;
         final float birdY = title.getY() + title.getHeight() + 25;
@@ -92,11 +83,66 @@ public class MainMenuScene extends BaseScene {
             mResourceManager.mMusic.resume();
         }
 
+        final float birdsButtonX = SCREEN_WIDTH / 2;
+        final float birdsButtonY = SCREEN_HEIGHT / 2 - mResourceManager.mPlayButtonTextureRegion.getHeight() / 4;
 
-        final float playX = SCREEN_WIDTH / 2 - mResourceManager.mPlayButtonTextureRegion.getWidth();
-        final float playY = SCREEN_HEIGHT / 2 - mResourceManager.mPlayButtonTextureRegion.getHeight() / 4;
+        myBirdsButton = new TiledSprite(birdsButtonX, birdsButtonY, mResourceManager.mBirdsButtonTextureRegion, mVertexBufferObjectManager) {
 
-        playButton = new TiledSprite(playX, playY, mResourceManager.mPlayButtonTextureRegion, mVertexBufferObjectManager) {
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (myBirdsButton.isVisible()) {
+                    if (pSceneTouchEvent.isActionDown()) {
+                        setCurrentTileIndex(1);
+                        mResourceManager.mButtonSound.play();
+                    }
+                    if (pSceneTouchEvent.isActionUp()) {
+                        setCurrentTileIndex(0);
+
+                        mSceneManager.setScene(SceneManager.SceneType.SCENE_MARKET);
+
+                    }
+                }
+                return true;
+            }
+        };
+
+
+        myBirdsButton.setCurrentTileIndex(0);
+        myBirdsButton.setScale(0.75f);
+        registerTouchArea(myBirdsButton);
+        attachChild(myBirdsButton);
+
+        final float moreOptionsX = birdsButtonX;
+        final float moreOptionsY = SCREEN_HEIGHT / 2 + mResourceManager.mHelpButtonTextureRegion.getHeight() / 2;
+
+        moreOptionsButton = new TiledSprite(moreOptionsX, moreOptionsY, mResourceManager.mMoreOptionsButtonTextureRegion, mVertexBufferObjectManager) {
+
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (moreOptionsButton.isVisible()) {
+                    if (pSceneTouchEvent.isActionDown()) {
+                        setCurrentTileIndex(1);
+                        mResourceManager.mButtonSound.play();
+                    }
+                    if (pSceneTouchEvent.isActionUp()) {
+                        setCurrentTileIndex(0);
+
+                        openMoreOptionsScene(true);
+
+
+                    }
+                }
+                return true;
+            }
+        };
+
+
+        moreOptionsButton.setCurrentTileIndex(0);
+        moreOptionsButton.setScale(0.75f);
+        registerTouchArea(moreOptionsButton);
+        attachChild(moreOptionsButton);
+
+        playButton = new TiledSprite(0, 0, mResourceManager.mPlayButtonTextureRegion, mVertexBufferObjectManager) {
 
             @Override
             public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
@@ -107,12 +153,7 @@ public class MainMenuScene extends BaseScene {
                     }
                     if (pSceneTouchEvent.isActionUp()) {
                         setCurrentTileIndex(0);
-                        playTransition = true;
-                        mBird.setVelocityX(90);
-                        playButton.setVisible(false);
-                        leaderboardButton.setVisible(false);
-                        marketButton.setVisible(false);
-                        helpButton.setVisible(false);
+                        mSceneManager.setScene(SceneManager.SceneType.SCENE_GAME);
 
                     }
                 }
@@ -122,103 +163,242 @@ public class MainMenuScene extends BaseScene {
 
 
         playButton.setCurrentTileIndex(0);
-        playButton.setScale(0.75f);
+        playButton.setX(RectangularShape.Side.RIGHT, SCREEN_WIDTH / 2);
+        playButton.setY(RectangularShape.Side.CENTER, (myBirdsButton.getY(RectangularShape.Side.BOTTOM) + moreOptionsButton.getY(RectangularShape.Side.TOP)) / 2);
+        playButton.setZIndex(100);
         registerTouchArea(playButton);
         attachChild(playButton);
 
 
-        final float leaderboardX = SCREEN_WIDTH / 2;
-        final float leaderboardY = playY;
+        mGooglePlayScene = new CameraScene(mCamera);
+        mGooglePlayScene.setBackgroundEnabled(false);
 
-        leaderboardButton = new TiledSprite(leaderboardX, leaderboardY, mResourceManager.mLeaderboardButtonTextureRegion, mVertexBufferObjectManager) {
+        final TiledSprite leaderboardButton = new TiledSprite(0, 0, mResourceManager.mLeaderboardButtonTextureRegion, mVertexBufferObjectManager) {
 
             @Override
             public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
-                if (leaderboardButton.isVisible()) {
-                    if (pSceneTouchEvent.isActionDown()) {
-                        setCurrentTileIndex(1);
-                        mResourceManager.mButtonSound.play();
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
 
-                    }
-
-                    if (pSceneTouchEvent.isActionUp()) {
-                        setCurrentTileIndex(0);
-                        if (mActivity.isNetworkAvailable()) {
-                            mSceneManager.setScene(SceneManager.SceneType.SCENE_LEADERBOARD);
-                        } else {
-                            mActivity.displayConnectionError();
-                        }
-                    }
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    mActivity.openLeaderboard();
                 }
                 return true;
             }
         };
         leaderboardButton.setCurrentTileIndex(0);
         leaderboardButton.setScale(0.75f);
-        registerTouchArea(leaderboardButton);
-        attachChild(leaderboardButton);
+        leaderboardButton.setX(RectangularShape.Side.RIGHT, SCREEN_WIDTH / 2);
+        leaderboardButton.setY(myBirdsButton.getY());
+        mGooglePlayScene.registerTouchArea(leaderboardButton);
+        mGooglePlayScene.attachChild(leaderboardButton);
 
-
-        final float marketX = playX;
-        final float marketY = playY + playButton.getHeight();
-
-        marketButton = new TiledSprite(marketX, marketY, mResourceManager.mMarketButtonTextureRegion, mVertexBufferObjectManager) {
+        final TiledSprite achievementsButton = new TiledSprite(0, 0, mResourceManager.mAchievementsButtonTextureRegion, mVertexBufferObjectManager) {
 
             @Override
             public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
-                if(marketButton.isVisible()) {
-                    if (pSceneTouchEvent.isActionDown()) {
-                        setCurrentTileIndex(1);
-                        mResourceManager.mButtonSound.play();
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
 
-                    }
-                    if (pSceneTouchEvent.isActionUp()) {
-                        setCurrentTileIndex(0);
-                        mSceneManager.setScene(SceneManager.SceneType.SCENE_MARKET);
-
-                    }
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    mActivity.openAchievements();
                 }
                 return true;
             }
         };
-        marketButton.setCurrentTileIndex(0);
-        marketButton.setScale(0.75f);
-        registerTouchArea(marketButton);
-        attachChild(marketButton);
+        achievementsButton.setCurrentTileIndex(0);
+        achievementsButton.setScale(0.75f);
+        achievementsButton.setX(RectangularShape.Side.RIGHT, SCREEN_WIDTH / 2);
+        achievementsButton.setY(moreOptionsButton.getY());
+        mGooglePlayScene.registerTouchArea(achievementsButton);
+        mGooglePlayScene.attachChild(achievementsButton);
 
 
-        final float helpX = leaderboardX;
-        final float helpY = playY + playButton.getHeight();
-
-        helpButton = new TiledSprite(helpX, helpY, mResourceManager.mHelpButtonTextureRegion, mVertexBufferObjectManager) {
+        final TiledSprite backButton = new TiledSprite(0, 0, mResourceManager.mBackButtonTextureRegion, mVertexBufferObjectManager) {
 
             @Override
             public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
-                if(helpButton.isVisible()) {
-                    if (pSceneTouchEvent.isActionDown()) {
-                        setCurrentTileIndex(1);
-                        mResourceManager.mButtonSound.play();
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
 
-                    }
-
-                    if (pSceneTouchEvent.isActionUp()) {
-                        setCurrentTileIndex(0);
-                        showingTutorial = true;
-                        setChildScene(mTutorialScene, false, true, true); //open tutorial scene
-
-                    }
                 }
-
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    openGooglePlayScene(false);
+                    openMoreOptionsScene(true);
+                }
                 return true;
             }
         };
+        backButton.setCurrentTileIndex(0);
+        backButton.setScale(0.75f);
+        backButton.setX(myBirdsButton.getX());
+        backButton.setY(myBirdsButton.getY());
+        mGooglePlayScene.registerTouchArea(backButton);
+        mGooglePlayScene.attachChild(backButton);
 
 
+        final TiledSprite logoutButton = new TiledSprite(0, 0, mResourceManager.mLogoutButtonTextureRegion, mVertexBufferObjectManager) {
+
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
+
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    mActivity.displayShortToast(mActivity.getString(R.string.signed_out));
+                    mActivity.signOutClicked();
+                }
+                return true;
+            }
+        };
+        logoutButton.setCurrentTileIndex(0);
+        logoutButton.setScale(0.75f);
+        logoutButton.setX(moreOptionsButton.getX());
+        logoutButton.setY(moreOptionsButton.getY());
+        mGooglePlayScene.registerTouchArea(logoutButton);
+        mGooglePlayScene.attachChild(logoutButton);
+
+
+        mMoreOptionsScene = new CameraScene(mCamera);
+        mMoreOptionsScene.setBackgroundEnabled(false);
+
+
+        final TiledSprite helpButton = new TiledSprite(0, 0, mResourceManager.mHelpButtonTextureRegion, mVertexBufferObjectManager) {
+
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
+
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    openTutorialScene(true);
+                }
+                return true;
+            }
+        };
         helpButton.setCurrentTileIndex(0);
         helpButton.setScale(0.75f);
-        registerTouchArea(helpButton);
-        attachChild(helpButton);
+        helpButton.setX(RectangularShape.Side.RIGHT, SCREEN_WIDTH / 2);
+        helpButton.setY(myBirdsButton.getY());
+        mMoreOptionsScene.registerTouchArea(helpButton);
+        mMoreOptionsScene.attachChild(helpButton);
 
+
+        final TiledSprite googlePlayButton = new TiledSprite(0, 0, mResourceManager.mGooglePlayButtonTextureRegion, mVertexBufferObjectManager) {
+
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
+
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                        if(!mActivity.isGooglePlayServicesAvailable()) {
+                            mActivity.openGooglePlayServicesErrorDialog();
+                        } else if(!mActivity.isConnectedToGooglePlay()) {
+                            mActivity.signInClicked();
+                        } else {
+                            openMoreOptionsScene(false);
+                            openGooglePlayScene(true);
+                        }
+                }
+                return true;
+            }
+        };
+        googlePlayButton.setCurrentTileIndex(0);
+        googlePlayButton.setScale(0.75f);
+        googlePlayButton.setX(RectangularShape.Side.LEFT, SCREEN_WIDTH / 2);
+        googlePlayButton.setY(myBirdsButton.getY());
+        mMoreOptionsScene.registerTouchArea(googlePlayButton);
+        mMoreOptionsScene.attachChild(googlePlayButton);
+
+
+        final TiledSprite adFreeButton = new TiledSprite(0, 0, mResourceManager.mAdFreeButtonTextureRegion, mVertexBufferObjectManager) {
+
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
+
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    mActivity.purchaseNoAds();
+                }
+                return true;
+            }
+        };
+        adFreeButton.setCurrentTileIndex(0);
+        adFreeButton.setScale(0.75f);
+        adFreeButton.setX(RectangularShape.Side.RIGHT, SCREEN_WIDTH / 2);
+        adFreeButton.setY(moreOptionsButton.getY());
+        mMoreOptionsScene.registerTouchArea(adFreeButton);
+        mMoreOptionsScene.attachChild(adFreeButton);
+
+
+        final TiledSprite backButton2 = new TiledSprite(0, 0, mResourceManager.mBackButtonTextureRegion, mVertexBufferObjectManager) {
+
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
+
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    openMoreOptionsScene(false);
+                }
+                return true;
+            }
+        };
+        backButton2.setCurrentTileIndex(0);
+        backButton2.setScale(0.75f);
+        backButton2.setX(moreOptionsButton.getX());
+        backButton2.setY(moreOptionsButton.getY());
+        mMoreOptionsScene.registerTouchArea(backButton2);
+        mMoreOptionsScene.attachChild(backButton2);
+
+
+        final TiledSprite aboutButton = new TiledSprite(0, 0, mResourceManager.mAboutButtonTextureRegion, mVertexBufferObjectManager) {
+
+            @Override
+            public boolean onAreaTouched(TouchEvent pSceneTouchEvent, float pTouchAreaLocalX, float pTouchAreaLocalY) {
+                if (pSceneTouchEvent.isActionDown()) {
+                    setCurrentTileIndex(1);
+                    mResourceManager.mButtonSound.play();
+
+                }
+                if (pSceneTouchEvent.isActionUp()) {
+                    setCurrentTileIndex(0);
+                    mActivity.alert(mActivity.getString(R.string.about));
+                }
+                return true;
+            }
+        };
+        aboutButton.setCurrentTileIndex(0);
+        aboutButton.setScale(0.75f);
+        aboutButton.setX(RectangularShape.Side.CENTER, SCREEN_WIDTH / 2);
+        aboutButton.setY(moreOptionsButton.getY() + mResourceManager.mAboutButtonTextureRegion.getHeight() * 3 / 4);
+        mMoreOptionsScene.registerTouchArea(aboutButton);
+        mMoreOptionsScene.attachChild(aboutButton);
 
         final Rectangle ground = new Rectangle(0, SCREEN_HEIGHT - mResourceManager.mParallaxLayerFront.getHeight(), SCREEN_WIDTH, mResourceManager.mParallaxLayerFront.getHeight(), mVertexBufferObjectManager);
         ground.setColor(Color.TRANSPARENT);
@@ -288,6 +468,7 @@ public class MainMenuScene extends BaseScene {
                     int tutorialTileIndex = tutorial.getCurrentTileIndex();
                     if (tutorialTileIndex == MAX_TUTORIAL_TILE_INDEX) {
                         tutorial.setCurrentTileIndex(0);
+                        openTutorialScene(false);
                     } else {
                         tutorial.setCurrentTileIndex(tutorialTileIndex + 1);
                     }
@@ -310,10 +491,8 @@ public class MainMenuScene extends BaseScene {
                     mResourceManager.mButtonSound.play();
                 }
                 if (pSceneTouchEvent.isActionUp()) {
-                    setCurrentTileIndex(0);
-                    showingTutorial = false;
                     tutorial.setCurrentTileIndex(0);
-                    clearChildScene();
+                    openTutorialScene(false);
                 }
                 return true;
             }
@@ -323,6 +502,13 @@ public class MainMenuScene extends BaseScene {
         mTutorialScene.registerTouchArea(closeButton);
         mTutorialScene.attachChild(closeButton);
 
+
+        mActivity.setInitialSceneLoaded(true);
+
+        if(mActivity.getFirstTimePlaying()) {
+            openTutorialScene(true);
+            mActivity.setFirstTimePlaying(false);
+        }
     }
 
     /**
@@ -366,15 +552,16 @@ public class MainMenuScene extends BaseScene {
 
         crap.setPosition(currentXPosition, currentYPosition + (mBird.getHeight()));
 
-        crap.setXVelocity(randomizeCrapVelocityX());
+        crap.setVelocityX(randomizeCrapVelocityX());
 
+        //handle ninja bird
         if(mActivity.getSelectedBird() == 6) {
             crap.setAngularVelocity(600);
         }
 
         attachChild(crap);
 
-        crap.setZIndex(5);
+        sortChildren();
 
     }
 
@@ -394,8 +581,13 @@ public class MainMenuScene extends BaseScene {
 
     @Override
     public void onBackKeyPressed() {
-        if(showingTutorial) {
-            clearChildScene();
+        if(tutorialSceneOpen) {
+            openTutorialScene(false);
+        } else if (googlePlaySceneOpen) {
+            openGooglePlayScene(false);
+            openMoreOptionsScene(true);
+        } else if(moreOptionsSceneOpen) {
+            openMoreOptionsScene(false);
         } else if (playTransition) {
             mSceneManager.setScene(SceneManager.SceneType.SCENE_MENU);
         } else {
@@ -412,6 +604,54 @@ public class MainMenuScene extends BaseScene {
     @Override
     public void disposeScene() {
         //TODO
+    }
+
+    private void openGooglePlayScene(boolean bool) {
+        if(bool) {
+            googlePlaySceneOpen = true;
+            playButton.setVisible(false);
+            myBirdsButton.setVisible(false);
+            moreOptionsButton.setVisible(false);
+            setChildScene(mGooglePlayScene, false, false, true);
+        } else {
+            googlePlaySceneOpen = false;
+            playButton.setVisible(true);
+            myBirdsButton.setVisible(true);
+            moreOptionsButton.setVisible(true);
+            clearChildScene();
+        }
+    }
+
+    private void openMoreOptionsScene(boolean bool) {
+        if(bool) {
+            moreOptionsSceneOpen = true;
+            playButton.setVisible(false);
+            myBirdsButton.setVisible(false);
+            moreOptionsButton.setVisible(false);
+            setChildScene(mMoreOptionsScene, false, false, true);
+        } else {
+            moreOptionsSceneOpen = false;
+            playButton.setVisible(true);
+            myBirdsButton.setVisible(true);
+            moreOptionsButton.setVisible(true);
+            clearChildScene();
+        }
+    }
+
+    private void openTutorialScene(boolean bool) {
+        if(bool) {
+            tutorialSceneOpen = true;
+            playButton.setVisible(false);
+            myBirdsButton.setVisible(false);
+            moreOptionsButton.setVisible(false);
+            setChildScene(mTutorialScene, false, true, true);
+        } else {
+            tutorialSceneOpen = false;
+            playButton.setVisible(true);
+            myBirdsButton.setVisible(true);
+            moreOptionsButton.setVisible(true);
+            clearChildScene();
+        }
     }
 
 }

@@ -1,6 +1,7 @@
 package com.application.nick.crappybird.scene;
 
 import com.application.nick.crappybird.GameActivity;
+import com.application.nick.crappybird.GameValues;
 import com.application.nick.crappybird.ResourceManager;
 import com.application.nick.crappybird.SceneManager;
 
@@ -12,10 +13,8 @@ import org.andengine.opengl.vbo.VertexBufferObjectManager;
 /**
  * Created by Nick on 4/5/2015.
  */
-public abstract class BaseScene extends Scene {
+public abstract class BaseScene extends Scene implements GameValues {
 
-    protected final int SCREEN_WIDTH = GameActivity.CAMERA_WIDTH;
-    protected final int SCREEN_HEIGHT = GameActivity.CAMERA_HEIGHT;
 
     protected GameActivity mActivity;
     protected Engine mEngine;

@@ -13,28 +13,39 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
-import android.view.View;
 import android.widget.Toast;
 
+import com.application.nick.crappybird.entity.MarketBird;
 import com.application.nick.crappybird.scene.GameScene;
 import com.application.nick.crappybird.scene.MarketScene;
-import com.application.nick.crappybird.util.DateUtil;
-import com.application.nick.crappybird.util.IabHelper;
-import com.application.nick.crappybird.util.IabResult;
-import com.application.nick.crappybird.util.Inventory;
-import com.application.nick.crappybird.util.Purchase;
-import com.google.android.gms.ads.AdRequest;
-import com.google.android.gms.ads.AdView;
+import com.application.nick.crappybird.iabutil.IabHelper;
+import com.application.nick.crappybird.iabutil.IabResult;
+import com.application.nick.crappybird.iabutil.Inventory;
+import com.application.nick.crappybird.iabutil.Purchase;
+import com.crashlytics.android.Crashlytics;
+import com.crashlytics.android.answers.Answers;
+import com.crashlytics.android.answers.LevelEndEvent;
+import com.crashlytics.android.answers.LevelStartEvent;
+import com.crashlytics.android.answers.PurchaseEvent;
+import com.crashlytics.android.answers.RatingEvent;
+
+import com.chartboost.sdk.CBLocation;
+import com.chartboost.sdk.Chartboost;
+import com.chartboost.sdk.ChartboostDelegate;
+
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.games.achievement.AchievementBuffer;
+import com.google.android.gms.games.achievement.Achievements;
+import com.kobakei.ratethisapp.RateThisApp;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesUtil;
-import com.parse.GetCallback;
-import com.parse.Parse;
-import com.parse.ParseException;
-import com.parse.ParseObject;
-import com.parse.ParseUser;
-import com.parse.SaveCallback;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.games.Games;
+import com.google.android.gms.plus.Plus;
+import com.google.example.games.basegameutils.BaseGameUtils;
 
+import io.fabric.sdk.android.Fabric;
 import org.andengine.engine.camera.Camera;
 import org.andengine.engine.handler.timer.ITimerCallback;
 import org.andengine.engine.handler.timer.TimerHandler;
@@ -44,57 +55,97 @@ import org.andengine.engine.options.resolutionpolicy.CroppedResolutionPolicy;
 import org.andengine.entity.scene.Scene;
 import org.andengine.ui.activity.LayoutGameActivity;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Date;
+import java.util.Currency;
+import java.util.Iterator;
 import java.util.List;
 
 
-public class GameActivity extends LayoutGameActivity {
+public class GameActivity extends LayoutGameActivity implements
+        GameValues,
+        GoogleApiClient.ConnectionCallbacks,
+        GoogleApiClient.OnConnectionFailedListener {
 
-    private final String SKU_1000_PIZZA = "1000pizza";
-    private final String SKU_5000_PIZZA = "5000pizza";
-    private final String SKU_10000_PIZZA = "10000pizza";
-    private final int IAB_REQUEST_CODE = 10001;
-    private final int PLAY_SERVICES_ERROR_REQUEST_CODE = 10002;
-
-    private static final String[] SKU_PIZZA_PURCHASE = {
-            "1000pizza",
-            "5000pizza",
-            "10000pizza"
-    };
-
-    public static final int[] DAILY_REWARDS = {
-            50,
-            100,
-            150,
-            200,
-            500
-    };
+    private final String SKU_REMOVE_ADS = "no_ads";
 
     public static final int CAMERA_WIDTH = 320;
     public static final int CAMERA_HEIGHT = 533;
+
+    public MarketBird[] marketBirds = new MarketBird[18];
 
     private Camera mCamera;
     private ResourceManager mResourceManager;
     private SceneManager mSceneManager;
 
-    private AdView mAdView;
-
     private IabHelper mHelper;
 
-    private String price1000Pizza;
-    private String price5000Pizza;
-    private String price10000Pizza;
-
-    public String[] pizzaPurchasePrices = new String[3];
-
-    private boolean inAppBillingSetup = false, soundOn = true;
+    private boolean inAppBillingSetup = false, soundOn = true, mAdFree, rateDialogOpenedThisSession, initialSceneLoaded = false;
 
     private GameActivity mActivity = this;
+
+    private GoogleApiClient mGoogleApiClient;
+
+    private static int RC_SIGN_IN = 9001, REQUEST_LEADERBOARD = 9002, REQUEST_ACHIEVEMENTS = 9003, PLAY_SERVICES_ERROR_REQUEST_CODE = 9004, IAB_REQUEST_CODE = 9005;
+
+    private boolean mResolvingConnectionFailure = false;
+    private boolean mAutoStartSignInFlow = true;
+    private boolean mSignInClicked = false;
+    boolean mExplicitSignOut = false;
+    boolean mInSignInFlow = false; // set to true when you're in the middle of the sign in flow, to know you should not attempt to connect in onStart()
+
+    //handles chartboost callbacks. Declare delegate methods here, see CBSample project for examples
+    // https://answers.chartboost.com/hc/en-us/articles/201219505#inplay
+    private ChartboostDelegate chartboostDelegate = new ChartboostDelegate() {
+
+        // Called after an interstitial has been displayed on the screen.
+        public void didDisplayInterstitial(String location) {
+            if(getSoundOn()) {
+                mResourceManager.mMusic.pause();
+                getEngine().getSoundManager().setMasterVolume(0);
+            }
+        }
+
+        // Called after an interstitial has been closed.
+        public void didCloseInterstitial(String location) {
+            if(getSoundOn()) {
+                mResourceManager.mMusic.resume();
+                getEngine().getSoundManager().setMasterVolume(1);
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Fabric.with(this, new Crashlytics());
+
+        MarketBird[] marketBirds = {
+                new MarketBird("Classic Bird", null, 0, true),
+                new MarketBird("Red Bird", getString(R.string.achievement_red), 1, false),
+                new MarketBird("Blue Bird", getString(R.string.achievement_blue), 2, false),
+                new MarketBird("Brown Bird", getString(R.string.achievement_brown), 3, false),
+                new MarketBird("Black Bird", getString(R.string.achievement_black), 4, false),
+                new MarketBird("White Bird", getString(R.string.achievement_white), 5, false),
+                new MarketBird("Pirate Bird", getString(R.string.achievement_pirate), 14, false),
+                new MarketBird("Ninja Bird", getString(R.string.achievement_ninja), 6, false),
+                new MarketBird("Rainbow Bird", getString(R.string.achievement_rainbow), 7, false),
+                new MarketBird("Backward Bird", getString(R.string.achievement_backwards), 12, false),
+                new MarketBird("Flashy Bird", getString(R.string.achievement_flashy), 15, false),
+                new MarketBird("Super Bird", getString(R.string.achievement_super), 17, false),
+                new MarketBird("Hungry Bird", getString(R.string.achievement_hungry), 8, false),
+                new MarketBird("Blocky Bird", getString(R.string.achievement_blocky), 9, false),
+                new MarketBird("#FFB Bird", getString(R.string.achievement_ffb), 13, false),
+                new MarketBird("Ghost Bird", getString(R.string.achievement_ghost), 10, false),
+                new MarketBird("Mystery Bird", getString(R.string.achievement_mystery), 16, false),
+                new MarketBird("Golden Bird", getString(R.string.achievement_gold), 11, false)
+        };
+
+        for(int i = 0; i < marketBirds.length; i++) {
+            this.marketBirds[i] = marketBirds[i];
+        }
+
+
 
         int screenWidth;
         int screenHeight;
@@ -121,27 +172,26 @@ public class GameActivity extends LayoutGameActivity {
 
         if(isGooglePlayServicesAvailable()) {
 
-            /*Dialog dialog = GooglePlayServicesUtil.getErrorDialog(GooglePlayServicesUtil.isGooglePlayServicesAvailable(this), this, PLAY_SERVICES_ERROR_REQUEST_CODE);
-            dialog.show();
-            */
-            if (isNetworkAvailable()) {
+            // Create the Google Api Client with access to the Play Games services
+            mGoogleApiClient = new GoogleApiClient.Builder(this)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .addApi(Games.API).addScope(Games.SCOPE_GAMES)
+                    .addApi(Plus.API).addScope(Plus.SCOPE_PLUS_LOGIN)
+                            // add other APIs and scopes here as needed
+                    .build();
 
-                if(dimensionRatio > 1.6) { //don't create banner ad if it will cover up buttons.
-                    //create banner ad from admob
-                    createBannerAd();
-                }
-
-                //Parse
-                setupInAppBilling();
-            }
+            setupInAppBilling();
 
         }
 
+        Chartboost.startWithAppId(this, getString(R.string.chartboost_id), getString(R.string.chartboost_signature));
+        /* Optional: If you want to program responses to Chartboost events, supply a delegate object here and see step (10) for more information */
+        Chartboost.setDelegate(chartboostDelegate);
+        Chartboost.onCreate(this);
 
-        Parse.initialize(this, "YpJ9WQuoN4XQYw2y0YOQRLvzSBEsskGpWebUgWzf", "4VswpUtUtyVdWSWrtugliH1zdkTOY91uoXm6kjMF");
 
-
-
+        initializeRateDialog();
     }
 
     public boolean isGooglePlayServicesAvailable() {
@@ -173,16 +223,13 @@ public class GameActivity extends LayoutGameActivity {
             public void onIabSetupFinished(IabResult result) {
                 if (!result.isSuccess()) {
                     // Oh noes, there was a problem.
-                    Log.d("Crappy Bird", "Problem setting up In-app Billing: " + result);
+                    Log.d(TAG, "Problem setting up In-app Billing: " + result);
                 } else {
-                    Log.i("In app Billing", "Successfully set up");
+                    Log.i(TAG, "IAB Successfully set up");
 
-                    List<String> additionalSkuList = new ArrayList<String>();
-                    additionalSkuList.add(SKU_1000_PIZZA);
-                    additionalSkuList.add(SKU_5000_PIZZA);
-                    additionalSkuList.add(SKU_10000_PIZZA);
-                    mHelper.queryInventoryAsync(true, additionalSkuList,
-                            mQueryFinishedListener);
+                    queryInventory();
+
+                    inAppBillingSetup = true;
 
                 }
                 // Hooray, IAB is fully set up!
@@ -196,6 +243,13 @@ public class GameActivity extends LayoutGameActivity {
         return inAppBillingSetup;
     }
 
+    private void queryInventory() {
+        List<String> additionalSkuList = new ArrayList<String>();
+        additionalSkuList.add(SKU_REMOVE_ADS);
+        mHelper.queryInventoryAsync(true, additionalSkuList,
+                mQueryFinishedListener);
+    }
+
     /**
      * This is a callback for after querying IAPs from Google Play Dev Console
      */
@@ -205,33 +259,11 @@ public class GameActivity extends LayoutGameActivity {
         {
             if (result.isFailure()) {
                 // handle error
-                Log.e("QueryInventory Error", result.toString());
+                Log.e(TAG, "QueryInventory Error: " + result.toString());
                 return;
             }
-            //get prices of available purchases
-            price1000Pizza = inventory.getSkuDetails(SKU_1000_PIZZA).getPrice();
-            pizzaPurchasePrices[0] = price1000Pizza;
-            price5000Pizza = inventory.getSkuDetails(SKU_5000_PIZZA).getPrice();
-            pizzaPurchasePrices[1] = price5000Pizza;
-            price10000Pizza = inventory.getSkuDetails(SKU_10000_PIZZA).getPrice();
-            pizzaPurchasePrices[2] = price10000Pizza;
+            mAdFree = inventory.hasPurchase(SKU_REMOVE_ADS);
 
-            if(price1000Pizza != null && price5000Pizza != null && price10000Pizza != null) {
-                inAppBillingSetup = true;
-            }
-
-            //consume any unconsumed purchases
-            if(ParseUser.getCurrentUser() != null) {
-                for (int i = 0; i < GameActivity.SKU_PIZZA_PURCHASE.length; i++) {
-                    Purchase purchase = inventory.getPurchase(SKU_PIZZA_PURCHASE[i]);
-                    if (purchase != null) {
-                        Log.d("CrappyBird", "User has pizza. Consuming it.");
-                        mHelper.consumeAsync(inventory.getPurchase(SKU_PIZZA_PURCHASE[i]), mConsumeFinishedListener);
-                        return;
-                    }
-                }
-            }
-            // update the UI
         }
     };
 
@@ -241,6 +273,7 @@ public class GameActivity extends LayoutGameActivity {
 
         final EngineOptions engineOptions = new EngineOptions(true, ScreenOrientation.PORTRAIT_FIXED, new CroppedResolutionPolicy(CAMERA_WIDTH, CAMERA_HEIGHT), mCamera);
         engineOptions.getAudioOptions().setNeedsSound(true).setNeedsMusic(true);
+        engineOptions.getAudioOptions().getSoundOptions().setMaxSimultaneousStreams(100);
         return engineOptions;
     }
 
@@ -267,6 +300,8 @@ public class GameActivity extends LayoutGameActivity {
                 mResourceManager.loadGameResources();
                 mSceneManager.setScene(SceneManager.SceneType.SCENE_MENU);
                 mResourceManager.unloadSplashResources();
+                requestNewInterstitial();
+
             }
         }));
         pOnCreateSceneCallback.onCreateSceneFinished(mSceneManager.createSplashScene());
@@ -289,189 +324,11 @@ public class GameActivity extends LayoutGameActivity {
     }
 
 
-    public void createBannerAd() {
-
-        mAdView = (AdView) findViewById(R.id.adViewId);
-        AdRequest adRequest = new AdRequest.Builder()
-                .addTestDevice("B9BF21FBE22B0C2B4AC09A79D8D26A77")
-                .addTestDevice("1F5D4F5EF276A5EBD06A821334E7E4A1")
-                .build();
-        mAdView.loadAd(adRequest);
-
-    }
-
-
-    public void saveCurrentUser() {
-        if(isNetworkAvailable()) {
-            ParseUser.getCurrentUser().saveInBackground();
-        } else {
-            ParseUser.getCurrentUser().saveEventually();
-        }
-    }
-
-    public void updateCurrentUser() {
-        if(ParseUser.getCurrentUser() != null && isNetworkAvailable()) {
-            final ParseUser currentUser = ParseUser.getCurrentUser();
-            try {
-                currentUser.fetchInBackground(new GetCallback<ParseObject>() {
-                    public void done(ParseObject object, ParseException e) {
-                        if (e == null) {
-                            // Success!
-                            syncUser(object);
-                        } else {
-                            // Failure!
-                            e.printStackTrace();
-                        }
-                    }
-                });
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
-        }
-
-        if (isNetworkAvailable() && !inAppBillingSetup && isGooglePlayServicesAvailable()) {
-            setupInAppBilling();
-        }
-    }
-
-    /**
-     * Syncs the current user's highscore and pizza
-     * @param object
-     */
-    public void syncUser(ParseObject object) {
-        Log.i("Syncing User", "Syncing User");
-        Log.i("highScore", String.valueOf(object.getInt("highScore")));
-        Log.i("pizzaCollected", String.valueOf(object.getInt("pizzaCollected")));
-        Log.i("pizzaCollectedOffline", String.valueOf(getPizzaSinceOffline()));
-        if(object.getInt("highScore") > getMaxScore()) {
-            setMaxScore(object.getInt("highScore"));
-        }
-        setPizza(object.getInt("pizzaCollected") + getPizzaSinceOffline());
-        setPizzaSinceOffline(0);
-        ParseUser.getCurrentUser().put("pizzaCollected", getPizza());
-        saveCurrentUser();
-
-        Log.i("Scene Type", String.valueOf(mSceneManager.getCurrentSceneType()));
-        if(mSceneManager.getCurrentSceneType() == SceneManager.SceneType.SCENE_MARKET) {
-            Log.i("Scene Type", "Scene_market");
-            ((MarketScene)mSceneManager.getCurrentScene()).updateTotalPizzaText();
-        }
-    }
-
-    /**
-     * Handles the process of displaying the daily reward. Also syncs user. Should not be done without internet connection
-     */
-    public void displayDailyReward() {
-        ParseUser.getCurrentUser().fetchInBackground(new GetCallback<ParseObject>() {
-            public void done(ParseObject object, ParseException e) {
-                if (e == null) {
-                    syncUser(object);
-                    final Date lastCollectedDate = object.getDate("lastCollectedDailyReward");
-                    if (lastCollectedDate == null) {
-                        //give 1st reward
-                        displayDailyReward(0);
-                        if (mSceneManager.getCurrentSceneType() == SceneManager.SceneType.SCENE_GAME) {
-                            ((GameScene) mSceneManager.getCurrentScene()).updateGameOverScreenAfterSync();
-                        }
-                    } else {
-                        Log.i("lastCollectedDate", lastCollectedDate.toString());
-                        ParseUser.getCurrentUser().saveInBackground(new SaveCallback() {
-                            public void done(ParseException e) {
-                                if (e == null) {
-                                    ParseUser.getCurrentUser().fetchInBackground(new GetCallback<ParseObject>() {
-                                        public void done(ParseObject object, ParseException e) {
-                                            if (e == null) {
-                                                // Success!
-                                                Date today = object.getUpdatedAt();
-                                                Log.i("updatedAt", today.toString());
-                                                boolean isToday = false;
-                                                if (lastCollectedDate.toString().substring(4, 10).equals(today.toString().substring(4, 10))) { //substring 4-10 will give "mon dd"
-                                                    //give no reward. User already collected today's
-                                                    isToday = true;
-                                                }
-                                                Date nextDay = DateUtil.addDays(lastCollectedDate, 1);
-                                                Log.i("lastCollectedDay2", lastCollectedDate.toString());
-                                                Log.i("nextDay", nextDay.toString());
-                                                if (today.toString().substring(4, 10).equals(nextDay.toString().substring(4, 10))) {
-                                                    //give next reward
-                                                    displayDailyReward(getNextDailyRewardNumber());
-                                                    Log.i("Daily reward", "NEXT");
-                                                } else if (!isToday) {
-                                                    //give first reward
-                                                    displayDailyReward(0);
-                                                    Log.i("Daily reward", "FIRST");
-                                                }
-                                                if (mSceneManager.getCurrentSceneType() == SceneManager.SceneType.SCENE_GAME) {
-                                                    ((GameScene) mSceneManager.getCurrentScene()).updateGameOverScreenAfterSync();
-                                                }
-
-                                            } else {
-                                                // Failure! do nothing
-                                                Log.e("Daily Reward", "An error occurred");
-                                                e.printStackTrace();
-                                            }
-                                        }
-                                    });
-
-                                } else {
-                                    //Failure, do nothing
-                                    Log.e("Daily Reward", "An error occurred");
-                                    e.printStackTrace();
-                                }
-
-                            }
-                        });
-                    }
-                }
-            }
-        });
-    }
-
-    /**
-     * @return the number of the daily reward to give the user
-     */
-    public static int getNextDailyRewardNumber() {
-            int rewardNum = ParseUser.getCurrentUser().getInt("lastDailyRewardNumber") + 1;
-            if(rewardNum >= GameActivity.DAILY_REWARDS.length) {
-                return 0;
-            }
-            return rewardNum;
-    }
-
-    public void displayDailyReward(int rewardNum) {
-
-            String rewardString;
-            if (rewardNum < GameActivity.DAILY_REWARDS.length - 1) {
-                rewardString = "You just collected a daily reward of " + GameActivity.DAILY_REWARDS[rewardNum] + " pizza! Come back tomorrow " +
-                        "for an even better delicious prize!";
-            } else {
-                rewardString = "You just collected a daily reward of " + GameActivity.DAILY_REWARDS[rewardNum] + " pizza! Come back tomorrow " +
-                        "for another delicious prize!";
-            }
-            addPizza(GameActivity.DAILY_REWARDS[rewardNum]);
-
-            ParseUser currentUser = ParseUser.getCurrentUser();
-
-            Log.i("currentUser UpdatedAt", currentUser.getUpdatedAt().toString());
-
-            currentUser.put("pizzaCollected", getPizza());
-            currentUser.put("lastCollectedDailyReward", currentUser.getUpdatedAt());
-            currentUser.put("lastDailyRewardNumber", rewardNum);
-
-            saveCurrentUser();
-
-            alert(rewardString);
-
-    }
-
     public void openTwitterShare(int score) {
-        /*TweetComposer.Builder builder = new TweetComposer.Builder(this)
-                .text("I just scored " + score + " points in Crappy Bird! This game is awesome! #crappybird #addicting #craptastic https://goo.gl/eDWvTO");
-        builder.show();*/
 
         String application = "com.twitter.android";
 
-        String text = "I just scored " + score + " points in Crappy Bird! This game is awesome! #crappybird #addicting #craptastic https://goo.gl/eDWvTO";
+        String text = getString(R.string.i_just_scored) + " " + score + " " + getString(R.string.points_in_crappy_bird_twitter_share);
 
 
         Intent intent = this.getPackageManager().getLaunchIntentForPackage(application);
@@ -524,41 +381,14 @@ public class GameActivity extends LayoutGameActivity {
     }
 
     public void openOtherShare(int score) {
-        String message = "I just scored " + score + " points in Crappy Bird! This game is awesome. Get it on the Play Store and try to beat my score. https://goo.gl/eDWvTO";
+        String message = getString(R.string.i_just_scored) + " " + score + " " + getString(R.string.points_in_crappy_bird);
         Intent share = new Intent(Intent.ACTION_SEND);
         share.setType("text/plain");
         share.putExtra(Intent.EXTRA_TEXT, message);
 
-        startActivity(Intent.createChooser(share, "Share"));
+        startActivity(Intent.createChooser(share, getString(R.string.share)));
     }
 
-    public void openRate() {
-        Uri uri = Uri.parse("market://details?id=" + getPackageName());
-        Intent goToMarket = new Intent(Intent.ACTION_VIEW, uri);
-        try {
-            startActivity(goToMarket);
-        } catch (ActivityNotFoundException e) {
-            alert("Could not launch Play Store.");
-        }
-    }
-
-    public void openLoginActivity() {
-        if (isNetworkAvailable()) {
-            Intent intent = new Intent(this, LoginActivity.class);
-            startActivityForResult(intent, 100);
-        } else {
-            displayConnectionError();
-        }
-    }
-
-    public void openSignUpActivity() {
-        if(isNetworkAvailable()) {
-            Intent intent = new Intent(this, SignUpActivity.class);
-            startActivityForResult(intent, 100);
-        } else {
-            displayConnectionError();
-        }
-    }
 
 
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
@@ -570,68 +400,33 @@ public class GameActivity extends LayoutGameActivity {
                 // not handled, so handle it ourselves (here's where you'd
                 // perform any handling of activity results not related to in-app
                 // billing...
-                if (requestCode == 100) {
-                    if(resultCode == 200){ //result code is only 200 if a user just logged in or signed up
-                        syncUserOnLogin();
-                        mSceneManager.setScene(SceneManager.SceneType.SCENE_MENU);
-
-                        displayLongToast("Signed in as " + ParseUser.getCurrentUser().getUsername());
-
+                if (requestCode == RC_SIGN_IN) {
+                    mSignInClicked = false;
+                    mResolvingConnectionFailure = false;
+                    if (resultCode == RESULT_OK) {
+                        mGoogleApiClient.connect();
+                    } else {
+                        // Bring up an error dialog to alert the user that sign-in
+                        // failed. The R.string.signin_failure should reference an error
+                        // string in your strings.xml file that tells the user they
+                        // could not be signed in, such as "Unable to sign in."
+                        BaseGameUtils.showActivityResultError(this,
+                                requestCode, resultCode, R.string.unable_to_sign_in);
                     }
-                } else if (requestCode == PLAY_SERVICES_ERROR_REQUEST_CODE) {
+                }else if (requestCode == PLAY_SERVICES_ERROR_REQUEST_CODE) {
                     Intent refreshIntent = new Intent(this, GameActivity.class);
                     startActivity(refreshIntent);
                     finish();
                 }
                 super.onActivityResult(requestCode, resultCode, intent);
             } else {
-                Log.d("Crappy Bird", "onActivityResult handled by IABUtil.");
+                Log.d(TAG, "onActivityResult handled by IABUtil.");
             }
-
-    }
-
-    /**
-     * this method syncs the local max score with the saved score on the user's account
-     * Also adds all collected pizza to the account
-     * Used when they log in or sign up
-     */
-    public void syncUserOnLogin() {
-        ParseUser currentUser = ParseUser.getCurrentUser();
-        if (currentUser != null) {
-            int savedScore = currentUser.getInt("highScore");
-            if(savedScore > getMaxScore()) {
-                setMaxScore(savedScore);
-            } else {
-                currentUser.put("highScore", getMaxScore());
-            }
-
-            int pizzaOnAccount = currentUser.getInt("pizzaCollected");
-            pizzaOnAccount += getPizza();
-            setPizza(pizzaOnAccount);
-            currentUser.put("pizzaCollected", pizzaOnAccount);
-            currentUser.saveInBackground();
-
-        }
-    }
-
-    public void logout() {
-        //log the user out and set max score = 0. They can get it back by logging in again
-        setMaxScore(0);
-        setPizza(0);
-        String username = ParseUser.getCurrentUser().getUsername();
-        ParseUser.logOut();
-
-        mSceneManager.setScene(SceneManager.SceneType.SCENE_MENU);
-        displayLongToast(username + " signed out.");
 
     }
 
     public void displayConnectionError() {
-        alert("Please check your connection and try again.");
-    }
-
-    public void displayNotEnoughPizzaAlert() {
-        alert("Not enough pizza.");
+        alert(getString(R.string.connection_error));
     }
 
     public void displayLongToast(String string) {
@@ -680,20 +475,28 @@ public class GameActivity extends LayoutGameActivity {
 
     /**
      * for launching the IAB form.
-     * @param pizzaPurchaseIndex the index corresponding to the pizza purchase the user is getting (e.g. 0 = 1000 pizza)
+     * @param sku the sku of the purchase
      */
-    public void purchasePizza(int pizzaPurchaseIndex) {
+    public void purchase(String sku) {
         if(isNetworkAvailable()) {
             if(!mHelper.getAsyncInProgress()) {
-                mHelper.launchPurchaseFlow(this, SKU_PIZZA_PURCHASE[pizzaPurchaseIndex], IAB_REQUEST_CODE,
-                        mPurchaseFinishedListener, ParseUser.getCurrentUser() + "-" + SKU_PIZZA_PURCHASE[pizzaPurchaseIndex] + "-" + getPurchaseNumber());
-                incrementPurchaseNumber();
+                mHelper.launchPurchaseFlow(this, sku, IAB_REQUEST_CODE,
+                        mPurchaseFinishedListener, "");
 
             } else {
-                alert("Transaction already in progress. Please wait and try again later.");
+                alert(getString(R.string.transaction_in_progress));
             }
         } else {
             displayConnectionError();
+        }
+    }
+
+    public void purchaseNoAds() {
+
+        if(!mAdFree) {
+            purchase(SKU_REMOVE_ADS);
+        } else {
+            alert(getString(R.string.already_purchased));
         }
     }
 
@@ -705,55 +508,34 @@ public class GameActivity extends LayoutGameActivity {
             if (mHelper == null) return;
 
             if (result.isFailure()) {
-                Log.d("CrappyBird", "Error purchasing: " + result);
+                if(DEBUGGING)
+                    Log.d(TAG, "Error purchasing: " + result);
+                Answers.getInstance().logPurchase(new PurchaseEvent()
+                        .putItemPrice(BigDecimal.valueOf(0.99))
+                        .putCurrency(Currency.getInstance("USD"))
+                        .putItemName("Remove Ads")
+                        .putItemId("ad_free")
+                        .putSuccess(false));
                 return;
             }
             else {
-                mHelper.consumeAsync(purchase, mConsumeFinishedListener);
+                //purchase successful
+                alert(getString(R.string.remove_ads_thank_you_message));
+                mAdFree = true;
+
+                mSceneManager.setScene(SceneManager.SceneType.SCENE_MENU);
+
+                Answers.getInstance().logPurchase(new PurchaseEvent()
+                        .putItemPrice(BigDecimal.valueOf(0.99))
+                        .putCurrency(Currency.getInstance("USD"))
+                        .putItemName("Remove Ads")
+                        .putItemId("ad_free")
+                        .putSuccess(true));
             }
         }
     };
 
 
-    IabHelper.OnConsumeFinishedListener mConsumeFinishedListener =
-            new IabHelper.OnConsumeFinishedListener() {
-                public void onConsumeFinished(Purchase purchase, IabResult result) {
-                    if (result.isSuccess()) {
-                        if (purchase.getSku().equals(SKU_1000_PIZZA)) {
-
-                            addPizza(1000);
-                            ParseUser currentUser = ParseUser.getCurrentUser();
-                            currentUser.put("pizzaCollected", getPizza());
-                            saveCurrentUser();
-                            alert("You have purchased 1000 pizza for " + getPrice1000Pizza() + ". You now have " + getPizza() + " pizza. Happy crapping!");
-
-                        }
-                        else if (purchase.getSku().equals(SKU_5000_PIZZA)) {
-
-                            addPizza(5000);
-                            ParseUser currentUser = ParseUser.getCurrentUser();
-                            currentUser.put("pizzaCollected", getPizza());
-                            saveCurrentUser();
-                            alert("You have purchased 5000 pizza for " + getPrice5000Pizza() + ". You now have " + getPizza() + " pizza. Happy crapping!");
-
-                        }
-                        else if (purchase.getSku().equals(SKU_10000_PIZZA)) {
-
-                            addPizza(10000);
-                            ParseUser currentUser = ParseUser.getCurrentUser();
-                            currentUser.put("pizzaCollected", getPizza());
-                            saveCurrentUser();
-                            alert("You have purchased 10000 pizza for " + getPrice10000Pizza() + ". You now have " + getPizza() + " pizza. Happy crapping!");
-
-                        }
-
-                        mSceneManager.setScene(SceneManager.SceneType.SCENE_MENU);
-                    }
-                    else {
-                        alert("Something went wrong. Please try again or contact NJWIDMANN APPS for support.");
-                    }
-                }
-            };
 
     public void alert(String string) {
         final String message = string;
@@ -763,7 +545,7 @@ public class GameActivity extends LayoutGameActivity {
                 AlertDialog.Builder bld = new AlertDialog.Builder(context);
                 bld.setMessage(message);
                 bld.setNeutralButton("OK", null);
-                Log.d("Crappy Bird", "Showing alert dialog: " + message);
+                Log.d(TAG, "Showing alert dialog: " + message);
                 bld.create().show();
             }
         });
@@ -771,119 +553,168 @@ public class GameActivity extends LayoutGameActivity {
 
     }
 
-
-    public int getMaxScore() {
-        return getPreferences(Context.MODE_PRIVATE).getInt("maxScore", 0);
+    public void logGameStart() {
+        Answers.getInstance().logLevelStart(new LevelStartEvent());
+        if(DEBUGGING)
+            Log.i(TAG, "sending level start event to answers");
     }
 
-    public void setMaxScore(int maxScore) {
-        getPreferences(Context.MODE_PRIVATE).edit().putInt("maxScore", maxScore).commit();
-    }
-
-    public void setPurchaseNumber(int purchaseNumber) {
-        getPreferences(Context.MODE_PRIVATE).edit().putInt("purchaseNumber", purchaseNumber).commit();
-
-    }
-
-    public int getPurchaseNumber() {
-        return getPreferences(Context.MODE_PRIVATE).getInt("purchaseNumber", 0);
+    public void logGameFinished(int score) {
+        Answers.getInstance().logLevelEnd(new LevelEndEvent()
+                .putScore(score));
+        if(DEBUGGING)
+            Log.i(TAG, "sending level end event to answers with score " + score);
 
     }
 
-    public void incrementPurchaseNumber() {
-        int current = getPurchaseNumber();
-        current++;
-        setPurchaseNumber(current);
+    private void requestNewInterstitial() {
+        Chartboost.cacheInterstitial(CBLocation.LOCATION_GAMEOVER);
     }
 
 
-    public int getSelectedBird() {
-        return getPreferences(Context.MODE_PRIVATE).getInt("selectedBird", 0);
+    public void showAd() {
+        if (Chartboost.hasInterstitial(CBLocation.LOCATION_GAMEOVER)) {
+            setNumGamesPlayedSinceAdShown(0);
+            Chartboost.showInterstitial(CBLocation.LOCATION_GAMEOVER);
+        }
+        else {
+            requestNewInterstitial();
+        }
+
     }
 
-    public void setSelectedBird(int birdNum) {
-        getPreferences(Context.MODE_PRIVATE).edit().putInt("selectedBird", birdNum).commit();
+    /**
+     * used to show tutorial on first launch
+     * @return whether it is the first time the user is playing
+     */
+    public boolean getFirstTimePlaying() {
+        return getPreferences(Context.MODE_PRIVATE).getBoolean("firstTimePlaying", true);
     }
 
-    public int getPizza() {
-        return getPreferences(Context.MODE_PRIVATE).getInt("pizza", 0);
+    public void setFirstTimePlaying(boolean bool) {
+        getPreferences(Context.MODE_PRIVATE).edit().putBoolean("firstTimePlaying", bool).commit();
     }
 
-    public void setPizza(int pizza) {
-        getPreferences(Context.MODE_PRIVATE).edit().putInt("pizza", pizza).commit();
-    }
 
-    public void addPizza(int pizza) {
-        int currentPizza = getPizza();
-        currentPizza += pizza;
-        setPizza(currentPizza);
-    }
+    /**
+     * this runs post-Game and handles whether to display an ad or the rate dialog
+     */
+    public void handleGameFinished(int score) {
+        setNumGamesPlayedSinceAdShown(getNumGamesPlayedSinceAdShown() + 1);
 
-    public void subtractPizza(int pizza) {
-        int currentPizza = getPizza();
-        if(currentPizza > pizza) {
-            currentPizza -= pizza;
-            setPizza(currentPizza);
+        if (!mAdFree && getNumGamesPlayedSinceAdShown() >= GAMES_TO_PLAY_BEFORE_SHOWING_AD) {
+            showAd();
         } else {
-            setPizza(0);
+            if(isNetworkAvailable() && !getRatedAlready())
+                openRateDialog();
+        }
+
+        submitScoreToLeaderboard(score);
+        logGameFinished(score);
+    }
+
+
+    private void initializeRateDialog() {
+        // Custom criteria: 3 days and 5 launches
+        RateThisApp.Config config = new RateThisApp.Config(3, 10);
+        // Custom title and message
+        config.setTitle(R.string.rate_title);
+        config.setMessage(R.string.rate_message);
+        RateThisApp.init(config);
+
+        // Monitor launch times and interval from installation
+        RateThisApp.onStart(this);
+    }
+
+    public void openRateDialog() {
+        final GameActivity mActivity = this;
+
+        if(!rateDialogOpenedThisSession) {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    RateThisApp.showRateDialogIfNeeded(mActivity);
+                    rateDialogOpenedThisSession = true;
+                }
+            });
+
         }
     }
 
-    public int getPizzaSinceOffline() {
-        return getPreferences(Context.MODE_PRIVATE).getInt("pizzaSinceOffline", 0);
+    public void openRate() {
+        Uri uri = Uri.parse("market://details?id=" + getPackageName());
+        if(DEBUGGING)
+            Log.i(TAG, "package name: " + getPackageName());
+        Intent goToMarket = new Intent(Intent.ACTION_VIEW, uri);
+        try {
+            startActivity(goToMarket);
+            setRatedAlready(true);
+            Answers.getInstance().logRating(new RatingEvent()
+                    .putCustomAttribute("Location", "Main menu"));
+        } catch (ActivityNotFoundException e) {
+            alert(getString(R.string.could_not_launch_play_store));
+        }
     }
 
-    public void setPizzaSinceOffline(int pizza) {
-        getPreferences(Context.MODE_PRIVATE).edit().putInt("pizzaSinceOffline", pizza).commit();
+    public boolean getRatedAlready() {
+        return getPreferences(Context.MODE_PRIVATE).getBoolean("ratedAlready", false);
     }
 
-    public void addPizzaSinceOffline(int pizza) {
-        int currentPizza = getPizzaSinceOffline();
-        currentPizza += pizza;
-        setPizzaSinceOffline(currentPizza);
+    public void setRatedAlready(boolean bool) {
+        getPreferences(Context.MODE_PRIVATE).edit().putBoolean("ratedAlready", bool).commit();
     }
 
-    public void subtractPizzaSinceOffline(int pizza) {
-        int currentPizza = getPizzaSinceOffline();
-        currentPizza -= pizza;
-        setPizzaSinceOffline(currentPizza);
 
+    public int getMaxScore() {
+        return getPreferences(Context.MODE_PRIVATE).getInt("maxScore2", 0);
     }
 
+    public void setMaxScore(int maxScore) {
+        getPreferences(Context.MODE_PRIVATE).edit().putInt("maxScore2", maxScore).commit();
+    }
+
+
+    public int getMaxScoreSinceLastConnection() {
+        return getPreferences(Context.MODE_PRIVATE).getInt("maxScoreSinceLastConnection", 0);
+    }
+
+    public void setMaxScoreSinceLastConnection(int maxScore) {
+        getPreferences(Context.MODE_PRIVATE).edit().putInt("maxScoreSinceLastConnection", maxScore).commit();
+    }
+
+    public int getNumGamesPlayedSinceAdShown() {
+        return getPreferences(Context.MODE_PRIVATE).getInt("numGamesPlayed", -3); //start at -3 so person gets a few games in before first ad
+    }
+
+    public void setNumGamesPlayedSinceAdShown(int num) {
+        getPreferences(Context.MODE_PRIVATE).edit().putInt("numGamesPlayed", num).commit();
+    }
+
+    public int getSelectedBird() {
+        return getPreferences(Context.MODE_PRIVATE).getInt("selectedBird2", 0);
+    }
+
+    public void setSelectedBird(int birdNum) {
+        getPreferences(Context.MODE_PRIVATE).edit().putInt("selectedBird2", birdNum).commit();
+    }
 
     /**
-     * For getting the level of a certain power up
-     * @param powerUpIndex the index of the power-up level to retrieve. 0 = thunder taco; 1 = ham; 2 = muffin; 3 = melon
-     * @return the level. 0 = user has not unlocked the powerup yet. 1 = lowest level (5 seconds)
+     * used for achievements that require getting a certain score multiple times in a row
+     * @return the number of times already (without break) that they got that score
      */
-    public int getPowerUpLevel(int powerUpIndex) {
-        //return getPreferences(Context.MODE_PRIVATE).getInt("powerUp" + powerUpIndex, 0);
-        ParseUser currentUser = ParseUser.getCurrentUser();
-        int powerUpLevel = currentUser.getInt("powerUp" + powerUpIndex);
-        return powerUpLevel;
+    public int getAchievementInARow1Count() {
+        return getPreferences(Context.MODE_PRIVATE).getInt("achievementInARow1Count", 0);
     }
 
-    /**
-     * for setting the level of a certain power up
-     * @param powerUpIndex the index of the power up level to set. 0 = thunder taco; 1 = ham; 2 = muffin; 3 = melon
-     * @param level the level to set.
-     */
-    public void setPowerUpLevel(int powerUpIndex, int level) {
-        ParseUser currentUser = ParseUser.getCurrentUser();
-        currentUser.put("powerUp" + powerUpIndex, level);
-        saveCurrentUser();
+    public void setAchievementInARow1Count(int num) {
+        getPreferences(Context.MODE_PRIVATE).edit().putInt("achievementInARow1Count", num).commit();
     }
 
-    public String getPrice10000Pizza() {
-        return price10000Pizza;
+    public int getAchievementInARow2Count() {
+        return getPreferences(Context.MODE_PRIVATE).getInt("achievementInARow2Count", 0);
     }
 
-    public String getPrice5000Pizza() {
-        return price5000Pizza;
-    }
-
-    public String getPrice1000Pizza() {
-        return price1000Pizza;
+    public void setAchievementInARow2Count(int num) {
+        getPreferences(Context.MODE_PRIVATE).edit().putInt("achievementInARow2Count", num).commit();
     }
 
     public boolean isNetworkAvailable() {
@@ -900,10 +731,16 @@ public class GameActivity extends LayoutGameActivity {
 
         if (mHelper != null) mHelper.dispose();
         mHelper = null;
+        Chartboost.onDestroy(this);
+        System.exit(0);
+
     }
 
     @Override
     public void onBackPressed() {
+        // If an interstitial is on screen, close it.
+        if (Chartboost.onBackPressed())
+            return;
         if (mSceneManager.getCurrentScene() != null) {
             mSceneManager.getCurrentScene().onBackKeyPressed();
             return;
@@ -914,6 +751,8 @@ public class GameActivity extends LayoutGameActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        Chartboost.onResume(this);
+
 
         if(getResourcesLoaded() && !(mSceneManager.getCurrentSceneType() == SceneManager.SceneType.SCENE_GAME)) {
             if (mResourceManager.mMusic != null && !mResourceManager.mMusic.isPlaying()) {
@@ -942,7 +781,287 @@ public class GameActivity extends LayoutGameActivity {
         }
 
         super.onPause();
+        Chartboost.onPause(this);
+
 
     }
 
+    @Override
+    protected void onStart() {
+        super.onStart();
+        Chartboost.onStart(this);
+        if(DEBUGGING)
+            Log.d(TAG, "onStart(): connecting to Google Play Games");
+        if (isGooglePlayServicesAvailable() && !mInSignInFlow && !mExplicitSignOut) {
+            // auto sign in
+            mGoogleApiClient.connect();
+            mInSignInFlow = true;
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        Chartboost.onStop(this);
+        super.onStop();
+        if(DEBUGGING)
+            Log.d(TAG, "onStop(): disconnecting from Google Play Games");
+        if(isGooglePlayServicesAvailable()) {
+            mGoogleApiClient.disconnect();
+        }
+    }
+
+    @Override
+    public void onConnected(Bundle connectionHint) {
+        mInSignInFlow = false;
+
+        if(getMaxScoreSinceLastConnection() > 0) {
+            submitScoreToLeaderboard(getMaxScoreSinceLastConnection());
+            setMaxScoreSinceLastConnection(0);
+        }
+
+        handleAchievementsSinceLastConnection();
+
+        checkOwnedBirds();
+    }
+
+    @Override
+    public void onConnectionFailed(ConnectionResult connectionResult) {
+        if(DEBUGGING)
+            Log.d(TAG, "onConnectionFailed(): attempting to resolve");
+
+        mInSignInFlow = false;
+
+        if (mResolvingConnectionFailure) {
+            // already resolving
+            if(DEBUGGING)
+                Log.d(TAG, "onConnectionFailed(): already resolving");
+            return;
+        }
+
+        // if the sign-in button was clicked or if auto sign-in is enabled,
+        // launch the sign-in flow
+        if (mSignInClicked || mAutoStartSignInFlow) {
+            mAutoStartSignInFlow = false;
+            mSignInClicked = false;
+            mResolvingConnectionFailure = true;
+
+            // Attempt to resolve the connection failure using BaseGameUtils.
+            // The R.string.signin_other_error value should reference a generic
+            // error string in your strings.xml file, such as "There was
+            // an issue with sign-in, please try again later."
+            if (!BaseGameUtils.resolveConnectionFailure(this,
+                    mGoogleApiClient, connectionResult,
+                    RC_SIGN_IN, getString(R.string.signin_other_error))) {
+                mResolvingConnectionFailure = false;
+            }
+        }
+
+        // Put code here to display the sign-in button
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+        // Attempt to reconnect
+        if(DEBUGGING)
+            Log.d(TAG, "onConnectionSuspended(): attempting to connect");
+        mGoogleApiClient.connect();
+    }
+
+    // Call when the sign-in button is clicked
+    public void signInClicked() {
+        mSignInClicked = true;
+        mInSignInFlow = true;
+        mGoogleApiClient.connect();
+    }
+
+    // Call when the sign-out button is clicked
+    public void signOutClicked() {
+        mSignInClicked = false;
+        // user explicitly signed out, so turn off auto sign in
+        mExplicitSignOut = true;
+        if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+            Games.signOut(mGoogleApiClient);
+            mGoogleApiClient.disconnect();
+        }
+        setSelectedBird(0);
+        resetUnlockedBirds();
+        mSceneManager.setScene(SceneManager.SceneType.SCENE_MENU);
+    }
+
+    public boolean isConnectedToGooglePlay() {
+        return mGoogleApiClient.isConnected();
+    }
+
+
+    public void submitScoreToLeaderboard(int score) {
+        if(mGoogleApiClient.isConnected()) {
+            if(DEBUGGING)
+                Log.i(TAG, "Submitting:" + score);
+            Games.Leaderboards.submitScore(mGoogleApiClient, getString(R.string.leaderboard_id), score);
+        } else {
+            if(score > getMaxScoreSinceLastConnection()) {
+                if(DEBUGGING)
+                    Log.i(TAG, "Saving locally:" + score);
+                setMaxScoreSinceLastConnection(score);
+            }
+        }
+    }
+
+    public void openLeaderboard() {
+        if(mGoogleApiClient.isConnected()) {
+            startActivityForResult(Games.Leaderboards.getLeaderboardIntent(mGoogleApiClient,
+                    getString(R.string.leaderboard_id)), REQUEST_LEADERBOARD);
+        } else {
+            alert(getString(R.string.google_play_connection_error));
+        }
+
+    }
+
+    public void openAchievements() {
+        if(mGoogleApiClient.isConnected()) {
+            startActivityForResult(Games.Achievements.getAchievementsIntent(mGoogleApiClient),
+                    REQUEST_ACHIEVEMENTS);
+        } else {
+            alert(getString(R.string.google_play_connection_error));
+        }
+    }
+
+    public void unlockAchievement(String achievementID) {
+        if(mGoogleApiClient.isConnected()) {
+            Games.Achievements.unlock(mGoogleApiClient, achievementID);
+            unlockBird(achievementID);
+        } else {
+            setAchievementUnlocked(achievementID, true);
+        }
+
+    }
+
+    public boolean getAchievementUnlocked(String achievementID) {
+        return getPreferences(Context.MODE_PRIVATE).getBoolean("unlocked" + achievementID, false);
+    }
+
+
+    public void setAchievementUnlocked(String achievementID, boolean unlocked) {
+        getPreferences(Context.MODE_PRIVATE).edit().putBoolean("unlocked" + achievementID, unlocked).commit();
+    }
+
+    public void incrementAchievement(final String achievementID, int num) {
+        if(mGoogleApiClient.isConnected()) {
+            Games.Achievements.incrementImmediate(mGoogleApiClient, achievementID, num); /*.setResultCallback(new ResultCallback<Achievements.UpdateAchievementResult>() {
+
+                @Override
+                public void onResult(Achievements.UpdateAchievementResult arg0) {
+                    if (arg0.getStatus().getStatusCode() == GamesStatusCodes.STATUS_ACHIEVEMENT_UNLOCKED) {
+                        unlockBird(achievementID);
+                    }
+                }
+            });*/
+        } else {
+            setAchievementIncrementSinceLastConnection(achievementID, getAchievementIncrementSinceLastConnection(achievementID) + num);
+        }
+    }
+
+    public int getAchievementIncrementSinceLastConnection(String achievementID) {
+        return getPreferences(Context.MODE_PRIVATE).getInt("incremented" + achievementID, 0);
+    }
+
+    public void setAchievementIncrementSinceLastConnection(String achievementID, int num) {
+        getPreferences(Context.MODE_PRIVATE).edit().putInt("incremented" + achievementID, num).commit();
+    }
+
+    private void handleAchievementsSinceLastConnection() {
+        String[] unlockAchievementIDs = {
+                getString(R.string.achievement_red),
+                getString(R.string.achievement_rainbow),
+                getString(R.string.achievement_ghost),
+                getString(R.string.achievement_super),
+                getString(R.string.achievement_gold),
+                getString(R.string.achievement_blue),
+                getString(R.string.achievement_brown),
+                getString(R.string.achievement_pirate),
+                getString(R.string.achievement_hungry),
+                getString(R.string.achievement_ffb),
+                getString(R.string.achievement_mystery),
+                getString(R.string.achievement_backwards),
+                getString(R.string.achievement_flashy),
+                getString(R.string.achievement_ninja)
+
+        };
+        String[] incrementAchievementIDs = {
+                getString(R.string.achievement_black),
+                getString(R.string.achievement_white),
+                getString(R.string.achievement_blocky)
+
+        };
+
+        for(String ID : unlockAchievementIDs) {
+            if(getAchievementUnlocked(ID)) {
+                if(DEBUGGING)
+                    Log.i(TAG, "Unlocking " + ID);
+                unlockAchievement(ID);
+                setAchievementUnlocked(ID, false);
+            }
+        }
+
+        for(String ID : incrementAchievementIDs) {
+            if(getAchievementIncrementSinceLastConnection(ID) > 0) {
+                if(DEBUGGING)
+                    Log.i(TAG, "Incrementing " + ID + " by " + getAchievementIncrementSinceLastConnection(ID));
+                incrementAchievement(ID, getAchievementIncrementSinceLastConnection(ID));
+                setAchievementIncrementSinceLastConnection(ID, 0);
+            }
+        }
+    }
+
+    public void checkOwnedBirds() {
+        Games.Achievements.load(mGoogleApiClient, false).setResultCallback(new AchievementsLoadedCallback());
+    }
+
+    public void unlockBird(String achievementID) {
+        for(MarketBird bird : marketBirds) {
+            if(!bird.isUnlocked() && bird.getAchievementID().equals(achievementID)) {
+                bird.setUnlocked(true);
+            }
+        }
+    }
+
+    /**
+     * resets unlocked birds to just the "Classic Bird". Used for logout.
+     */
+    public void resetUnlockedBirds() {
+        for(int i = 1; i < marketBirds.length; i++) {
+            marketBirds[i].setUnlocked(false);
+        }
+    }
+
+    class AchievementsLoadedCallback implements ResultCallback<Achievements.LoadAchievementsResult> {
+
+        @Override
+        public void onResult(Achievements.LoadAchievementsResult arg0) {
+            com.google.android.gms.games.achievement.Achievement ach;
+            AchievementBuffer aBuffer = arg0.getAchievements();
+            Iterator<com.google.android.gms.games.achievement.Achievement> aIterator = aBuffer.iterator();
+
+            while (aIterator.hasNext()) {
+                ach = aIterator.next();
+                for(MarketBird bird : marketBirds) {
+                    if (!bird.isUnlocked() && bird.getAchievementID().equals(ach.getAchievementId())) {
+                        if (ach.getState() == com.google.android.gms.games.achievement.Achievement.STATE_UNLOCKED) {
+                            bird.setUnlocked(true);
+                        }
+                        //break;
+                    }
+                }
+            }
+            aBuffer.close();
+
+            if(initialSceneLoaded && mSceneManager.getCurrentSceneType().equals(SceneManager.SceneType.SCENE_MARKET)) {
+                ((MarketScene)(mSceneManager.getCurrentScene())).syncNewBirds();
+            }
+        }
+    }
+
+    public void setInitialSceneLoaded(boolean initialSceneLoaded) {
+        this.initialSceneLoaded = initialSceneLoaded;
+    }
 }

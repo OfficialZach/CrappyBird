@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_id">240319126517</string>
+    <string name="achievement_red">CgkI9beLof8GEAIQBQ</string>
+    <string name="achievement_rainbow">CgkI9beLof8GEAIQBg</string>
+    <string name="achievement_ghost">CgkI9beLof8GEAIQBw</string>
+    <string name="achievement_super">CgkI9beLof8GEAIQCA</string>
+    <string name="achievement_gold">CgkI9beLof8GEAIQCQ</string>
+    <string name="achievement_blue">CgkI9beLof8GEAIQCg</string>
+    <string name="achievement_brown">CgkI9beLof8GEAIQCw</string>
+    <string name="achievement_pirate">CgkI9beLof8GEAIQDA</string>
+    <string name="achievement_hungry">CgkI9beLof8GEAIQDQ</string>
+    <string name="achievement_ffb">CgkI9beLof8GEAIQDg</string>
+    <string name="achievement_mystery">CgkI9beLof8GEAIQDw</string>
+    <string name="achievement_black">CgkI9beLof8GEAIQEA</string>
+    <string name="achievement_white">CgkI9beLof8GEAIQEQ</string>
+    <string name="achievement_backwards">CgkI9beLof8GEAIQEg</string>
+    <string name="achievement_flashy">CgkI9beLof8GEAIQEw</string>
+    <string name="achievement_blocky">CgkI9beLof8GEAIQFA</string>
+    <string name="achievement_ninja">CgkI9beLof8GEAIQFQ</string>
+    <string name="leaderboard_id">CgkI9beLof8GEAIQBA</string>
+    <string name="chartboost_id">55d55abcf6cd457497116dc4</string>
+    <string name="chartboost_signature">d02460d23fe25267a44b6f6f5bba39767c428c3c</string>
+</resources>

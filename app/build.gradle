@@ -1,4 +1,4 @@
-/*buildscript {
+buildscript {
     repositories {
         maven { url 'https://maven.fabric.io/public' }
     }
@@ -6,17 +6,17 @@
     dependencies {
         classpath 'io.fabric.tools:gradle:1.+'
     }
-}*/
+}
 
 apply plugin: 'com.android.application'
-/*apply plugin: 'io.fabric'
+apply plugin: 'io.fabric'
 
 repositories {
     maven {
         mavenCentral()
         url 'https://maven.fabric.io/public'
     }
-}*/
+}
 
 
 android {
@@ -27,8 +27,8 @@ android {
         applicationId "com.application.nick.crappybird"
         minSdkVersion 10
         targetSdkVersion 21
-        versionCode 42
-        versionName "4.771"
+        versionCode 51
+        versionName "5.01"
     }
 
     buildTypes {
@@ -41,22 +41,13 @@ android {
 
 dependencies {
     compile fileTree(include: ['*.jar'], dir: 'libs')
-    compile 'com.android.support:appcompat-v7:21.0.3'
+    compile 'com.android.support:appcompat-v7:22.2.1'
     compile project(':andengine')
-    compile 'com.google.android.gms:play-services:7.3.0'
-
-    //compile 'com.google.android.gms:play-services:7.3.0'
-    /*dependencies {
-        compile('com.twitter.sdk.android:tweet-composer:0.7.3@aar')
-                {
-                    transitive = true;
-                }
-    }
-    compile('com.twitter.sdk.android:twitter:1.4.0@aar') {
+    compile project(':BaseGameUtils')
+    compile 'com.kobakei:ratethisapp:0.0.3'
+    compile 'com.google.android.gms:play-services:7.8.0'
+    compile('com.crashlytics.sdk.android:crashlytics:2.5.1@aar') {
         transitive = true;
-    }*/
-    dependencies {
-        compile 'com.parse.bolts:bolts-android:1.+'
-        compile fileTree(dir: 'libs', include: 'Parse-1.9.1.jar')
     }
+    compile files('libs/chartboost.jar')
 }
